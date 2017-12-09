@@ -1,15 +1,6 @@
 #!/usr/bin/env python
 # encoding: utf-8
 
-"""
-=================================================
-color pencil drawing implementation
-usage:
-    cd {file directory}
-    python color_pencil.py {path of img file you want to try}
-"""
-
-
 import numpy as np
 import sys
 from PIL import Image
@@ -19,9 +10,8 @@ import cv2
 from pencil_draw import get_S, get_T
 import image_tool
 
-def color_draw(path="img/46.jpg", gammaS=1, gammaI=1):
+def color_draw(path, outpath, gammaS=2.5, gammaI=3.5):
     im = Image.open(path)
-
     if im.mode == 'RGB':
         ycbcr = im.convert('YCbCr')
         Iruv = np.ndarray((im.size[1], im.size[0], 3), 'u1', ycbcr.tobytes())
@@ -34,7 +24,8 @@ def color_draw(path="img/46.jpg", gammaS=1, gammaI=1):
     print 'gen T'
     T = get_T(Iruv[:, :, 0], type, gammaI)
     print 'gen R'
-    Ypencil = S * T
+    ## element_wise production
+    Ypencil = np.multiply(S, T)
 
     new_Iruv = Iruv.copy()
     new_Iruv.flags.writeable = True
@@ -44,9 +35,9 @@ def color_draw(path="img/46.jpg", gammaS=1, gammaI=1):
     img = Image.fromarray(R)
     #img.show()
 
-    image_tool.save_image(image_tool.matrix2image(S), "46_S.jpg")
-    image_tool.save_image(image_tool.matrix2image(T), "46_T.jpg")
-    img.save("46_R.jpg")
+    #image_tool.save_image(image_tool.matrix2image(S), "46_S.jpg")
+    #image_tool.save_image(image_tool.matrix2image(T), "46_T.jpg")
+    img.save(outpath)
 
 
 if __name__ == "__main__":
@@ -55,8 +46,8 @@ if __name__ == "__main__":
     args = sys.argv
     length = len(args)
     if length > 1:
-        path = args[1]
-        color_draw(path=path)
+        filename=args[1]
     else:
-        color_draw()
+        filename="huangjin_8.jpeg"
+    color_draw("me/"+filename, "output/"+filename)
     print 'time consumes: {}'.format(time.time() - start)

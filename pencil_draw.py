@@ -1,6 +1,7 @@
 #encoding=utf8
 import math
 import numpy as np
+import scipy
 from scipy import signal
 from scipy.ndimage import interpolation
 from scipy.sparse import csr_matrix, spdiags
@@ -10,14 +11,6 @@ from PIL import Image
 import util
 import image_tool
 from stitch_function import horizontal_stitch, vertical_stitch
-
-conv_size_divider = 40
-
-#def im2double(mat):
-#    max_p = mat.max()
-#    min_p = mat.min()
-#    dis = max_p - min_p
-#    return (mat - float(min_p)) / dis
 
 def im2double(I):
     Min = I.min()
@@ -90,40 +83,13 @@ def get_S(mat, gamaS=1):
     """
     get sketch S of image
     """
-    h, w = mat.shape
-    line_len_double = float(min(h, w)) / conv_size_divider
-    line_len = int(line_len_double)
-    line_len += line_len % 2
-    #line_len = 20
+    line_len = 10 ##建筑可以长一些，花树木小一点
     C = conv_kernel(line_len)
     mat = im2double(mat)
     grad_im = grad_image(mat)
     S = max_conv(C, grad_im, gamaS)
     return S
   
-def get_Dx_Dy_v2(h, w):
-    size = h * w
-    nzmax = 2 * (size-1)
-    i = np.zeros((nzmax, 1))
-    j = np.zeros((nzmax, 1))
-    s = np.zeros((nzmax, 1))
-    for m in range(1, nzmax+1):
-        i[m-1] = int(math.ceil((m+0.1) / 2)) - 1
-        j[m-1] = int(math.ceil((m-0.1) / 2)) - 1
-        s[m-1] = -2 * (m % 2) + 1
-    dx = csr_matrix((s.T[0], (i.T[0], j.T[0])), shape=(size, size))
-
-    nzmax = 2 * (size - w)
-    i = np.zeros((nzmax, 1))
-    j = np.zeros((nzmax, 1))
-    s = np.zeros((nzmax, 1))
-    for m in range(1, nzmax+1):
-        i[m-1, :] = int(math.ceil((m-1+0.1)/2) + w * (m % 2)) - 1
-        j[m-1, :] = math.ceil((m-0.1)/2) - 1
-        s[m-1, :] = -2 * (m % 2) + 1
-    dy = csr_matrix((s.T[0], (i.T[0], j.T[0])), shape=(size, size))
-    return dx, dy
-
 def get_Dx_Dy(hsize, wsize):
     """
     计算(某个矩阵A->向量a)后，稀疏梯度算子矩阵Dx, Dy与该向量a运算
@@ -138,29 +104,27 @@ def get_Dx_Dy(hsize, wsize):
     Dy = spdiags(d, np.array([0, 1]), size, size)
     return Dx, Dy
 
-def get_T(mat, type="black", gamaI=1, texture_file="texture.jpg", L2=0.3):
+def get_T(mat, type="black", gamaI=1, texture_file="texture.jpg", L2=0.2):
     """
     """
     print 'start histogram matching....'
     adjustI = image_tool.pencil_histogram_matching(mat, type)
-    #from natural_histogram_matching  import natural_histogram_matching
-    #adjustI = natural_histogram_matching(mat, type)
     adjustI = pow(adjustI, gamaI)
-    image_tool.save_image(image_tool.matrix2image(adjustI), "46adjust.bmp")
+    #image_tool.save_image(image_tool.matrix2image(adjustI), "46adjust.bmp")
     
     print 'start gen texture....'
     texture_img = Image.open(texture_file)
     texture = np.matrix(texture_img.convert("L"))
     texture = texture[99: texture.shape[0]-100, 99: texture.shape[1]-100]
     #texture = texture[:1024, :1024]
-    texture_resize_ratio = 0.5
+    texture_resize_ratio = 0.35
     ratio = texture_resize_ratio * min(mat.shape) / 1024.0
     ## 长宽都按照比例缩放
     texture_resize = interpolation.zoom(texture, (ratio, ratio))
     texture = im2double(texture_resize)
     htexture = horizontal_stitch(texture, mat.shape[1])
     H = vertical_stitch(htexture, mat.shape[0])
-    image_tool.save_image(image_tool.matrix2image(H), "46H.bmp")
+    #image_tool.save_image(image_tool.matrix2image(H), "46H.bmp")
 
     print 'start gen Dx, Dy....'
     vec_len = mat.shape[0] * mat.shape[1]
@@ -179,43 +143,46 @@ def get_T(mat, type="black", gamaI=1, texture_file="texture.jpg", L2=0.3):
     ##equation:  A * beta = b
     b = log_H.T.dot(log_J)  ## 这里因为H已经是diag, 所以transpose可用可不用
     A = log_H.T.dot(log_H) + L2 * (Dx.T.dot(Dx) + Dy.T.dot(Dy))
+    
     ## calc beta 
     print 'start to spsolve'
-    beta_1D = spsolve(A, b)
+    ## either method is ok
+    #beta_1D = spsolve(A, b)
+    beta_1D, info = scipy.sparse.linalg.cg(A, b, tol=1e-5, maxiter=60)
+
     beta = np.reshape(beta_1D, (mat.shape[0], mat.shape[1]))
-    image_tool.save_image(image_tool.matrix2image(beta), "beta.bmp")
+    beta = (beta - beta.min()) / (beta.max() - beta.min()) * 5
+    #image_tool.save_image(image_tool.matrix2image(beta), "beta.bmp")
     
     print 'start to calc T..'
     T = pow(H, beta)
-    T = (T - T.min()) / (T.max() - T.min())
+    #T = (T - T.min()) / (T.max() - T.min())
     return T
 
-def pencil_draw():
+def pencil_draw(path, outpath):
     #rgb_im = image_tool.read_image("img/58.jpg")
     #mat = image_tool.rgb_img2gray_matrix(rgb_im)
-    im = Image.open("img/46.jpg")
+    #im = Image.open("me/huangjin_1.jpg")
+    im = Image.open(path)
     im = im.convert("L")
     mat = np.array(im)
     print 'gen S'
     S = get_S(mat, 2)
-    image_tool.save_image(image_tool.matrix2image(S), "46_S.bmp")
+    #image_tool.save_image(image_tool.matrix2image(S), "debug_S.bmp")
     
     print 'gen T'
-    T = get_T(mat, 'black', 3)
-    image_tool.save_image(image_tool.matrix2image(T), "46_T.bmp")
+    T = get_T(mat, 'black', 3.5)
+    #image_tool.save_image(image_tool.matrix2image(T), "debug_T.bmp")
     
     print 'gen R'
-    R = S * T
-    image_tool.save_image(image_tool.matrix2image(R), "46_R.bmp")
+    #R = S * T
+    R = np.multiply(S, T)
+    image_tool.save_image(image_tool.matrix2image(R), outpath)
 
-def test():
-    pass
-    #texture = image_tool.image2matrix(Image.open("texture.jpg"))
-    #print texture.shape
-    #dx = get_Dx(3, 3)
-    #print dx * np.matrix([[3,1,5,2,7,6,7,1,5]]).T
-    #print dx.toarray()
 
 if __name__ == '__main__':
-   pencil_draw()
-   #test()
+    is len(sys.argv) > 1:
+        filename = sys.argv[1]
+    else:
+        filename = "huangjin_8.jpeg"
+    pencil_draw("me/"+filename, "output/"+filename)
