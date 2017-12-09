@@ -181,7 +181,7 @@ def pencil_draw(path, outpath):
 
 
 if __name__ == '__main__':
-    is len(sys.argv) > 1:
+    if len(sys.argv) > 1:
         filename = sys.argv[1]
     else:
         filename = "huangjin_8.jpeg"
